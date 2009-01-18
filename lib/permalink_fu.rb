@@ -151,8 +151,7 @@ module PermalinkFu
     end
 
     def create_permalink_for(attr_names)
-      separator = self.class.permalink_options[:separator] || " "
-      attr_names.collect { |attr_name| send(attr_name).to_s } * separator
+      attr_names.collect { |attr_name| send(attr_name).to_s } * " "
     end
 
   private
