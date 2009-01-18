@@ -218,7 +218,7 @@ module PermalinkFu
           :conditions => {:model => self.class.data_model.name, :former_permalink => params[:id]})
 
         return unless redirect
-        redirect_to request.path.sub(/[\w-]+$/, redirect.current_permalink)
+        redirect_to request.path.sub(/[\w-]+$/i, redirect.current_permalink)
       end
     end
   end
