@@ -96,6 +96,73 @@ class BaseModel
   end
 end
 
+class Redirect < BaseModel
+  attr_accessor :model
+  attr_accessor :former_permalink, :current_permalink
+  attr_accessor :created_at, :updated_at
+
+  define_attribute_methods
+
+  @records = []
+
+  def initialize(attributes)
+    attributes.each { |k,v| self.send("#{k}=", v) }
+  end
+
+  def destroy
+    self.class.destroy(self)
+  end
+
+  def self.find(what, options = {})
+    finder = what == :all ? :select : :find
+
+    if options[:order]
+      @records.sort_by { |record| record.send(options[:order]) }
+    else
+      @records
+    end.send(finder) { |record| options[:conditions] ?
+      options[:conditions].all? { |key,value| value == record.send(key) } : true }
+  end
+
+  def self.exists?(attributes)
+    !find(:first, :conditions => attributes)
+  end
+
+  def self.create(attributes)
+    @records << new(attributes.merge(:created_at => Time.now, :updated_at => Time.now))
+  end
+
+  def self.count
+    @records.size
+  end
+
+  def self.clear
+    @records.clear
+  end
+
+  def self.destroy(record)
+    @records.reject! { |r| r.model == record.model &&
+      r.former_permalink == record.former_permalink &&
+      r.current_permalink == record.current_permalink }
+  end
+
+  def self.delete_all(conditions)
+    find(:all, :conditions => conditions).each { |r| r.destroy }
+  end
+
+  def self.destroy_all(conditions)
+    delete_all(conditions)
+  end
+
+  def self.update_all(updates, conditions = nil)
+    find(:all, :conditions => conditions).each do |r|
+      updates.first.scan(/\w+\s*=/).map do |s|
+        s.sub(/\s+/, '').intern 
+      end.each_with_index { |attr, i| r.send(attr, updates[i+1]) }
+    end
+  end
+end
+
 class MockModel < BaseModel
   def self.exists?(conditions)
     if conditions[1] == 'foo'   || conditions[1] == 'bar' || 
@@ -143,16 +210,6 @@ class OverrideModel < BaseModel
   def permalink
     'not the permalink'
   end
-end
-
-class ChangedModel < BaseModel
-  has_permalink :title  
-  def title_changed?; true; end
-end
-
-class NoChangeModel < BaseModel
-  has_permalink :title  
-  def title_changed?; false; end
 end
 
 class IfProcConditionModel < BaseModel
@@ -215,14 +272,51 @@ class PermalinkFuTest < Test::Unit::TestCase
     end
   end
   
-  def test_should_escape_activerecord_model_with_existing_permalink
+  def test_should_create_redirect_if_attributes_change
     @m = MockModel.new
-    @@samples.each do |from, to|
-      @m.title = 'whatever'; @m.permalink = from
-      assert_equal to, @m.validate
-    end
+    Redirect.clear
+
+    @m.title = 'antani'
+    @m.validate
+    assert_equal 0, Redirect.count
+
+    @m.title = 'tapioca'
+    @m.validate
+    assert_equal 1, Redirect.count
+
+    assert_not_nil Redirect.find(:first, :conditions => {:model => 'MockModel',
+      :former_permalink => 'antani', :current_permalink => 'tapioca'})
   end
-  
+
+  def test_should_not_create_redirect_if_attributes_dont_change
+    @m = MockModel.new
+    Redirect.clear
+
+    @m.title = 'antani'
+    @m.validate
+
+    @m.title = 'antani'
+    @m.validate
+
+    assert Redirect.count.zero?
+  end
+
+  def test_should_remove_redirect_if_attributes_are_rolled_back
+    @m = MockModel.new
+    Redirect.clear
+
+    @m.title = 'antani' ; @m.validate
+    @m.title = 'tapioca'; @m.validate
+    @m.title = 'sblinda'; @m.validate
+    @m.title = 'antani' ; @m.validate
+
+    assert_equal 2, Redirect.count
+    assert_not_nil Redirect.find(:first, :conditions => {:model => 'MockModel',
+      :former_permalink => 'tapioca', :current_permalink => 'antani'})
+    assert_not_nil Redirect.find(:first, :conditions => {:model => 'MockModel',
+      :former_permalink => 'sblinda', :current_permalink => 'antani'})
+  end
+
   def test_multiple_attribute_permalink
     @m = MockModelExtra.new
     @@samples.each do |from, to|
@@ -235,18 +329,18 @@ class PermalinkFuTest < Test::Unit::TestCase
   
   def test_should_create_unique_permalink
     @m = MockModel.new
-    @m.permalink = 'foo'
+    @m.title = 'foo'
     @m.validate
     assert_equal 'foo-2', @m.permalink
     
-    @m.permalink = 'bar'
+    @m.title = 'bar'
     @m.validate
     assert_equal 'bar-3', @m.permalink
   end
   
   def test_should_common_permalink_if_unique_is_false
     @m = CommonMockModel.new
-    @m.permalink = 'foo'
+    @m.title = 'foo'
     @m.validate
     assert_equal 'foo', @m.permalink
   end
@@ -254,19 +348,19 @@ class PermalinkFuTest < Test::Unit::TestCase
   def test_should_not_check_itself_for_unique_permalink
     @m = MockModel.new
     @m.id = 2
-    @m.permalink = 'bar-2'
+    @m.title = 'bar-2'
     @m.validate
     assert_equal 'bar-2', @m.permalink
   end
   
   def test_should_create_unique_scoped_permalink
     @m = ScopedModel.new
-    @m.permalink = 'foo'
+    @m.title = 'foo'
     @m.validate
     assert_equal 'foo-2', @m.permalink
   
     @m.foo = 5
-    @m.permalink = 'foo'
+    @m.title = 'foo'
     @m.validate
     assert_equal 'foo', @m.permalink
   end
@@ -346,21 +440,7 @@ class PermalinkFuTest < Test::Unit::TestCase
     assert_equal 'the-permalink', @m.read_attribute(:permalink)
   end
   
-  def test_should_not_update_permalink_unless_field_changed
-    @m = NoChangeModel.new
-    @m.title = 'the permalink'
-    @m.validate
-    assert_nil @m.read_attribute(:permalink)
-  end
-  
   def test_should_update_permalink_if_field_changed
-    @m = OverrideModel.new
-    @m.title = 'the permalink'
-    @m.validate
-    assert_equal 'the-permalink', @m.read_attribute(:permalink)
-  end
-  
-  def test_should_update_permalink_if_changed_method_does_not_exist
     @m = OverrideModel.new
     @m.title = 'the permalink'
     @m.validate
