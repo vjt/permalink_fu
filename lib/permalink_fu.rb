@@ -63,6 +63,7 @@ module PermalinkFu
         self.permalink_attributes = Array(attr_names)
         self.permalink_field      = (permalink_field || 'permalink').to_s
         self.permalink_options    = {:unique => true}.update(options)
+        self.redirect_model       = options.delete(:redirect_model) || Redirect
       end
     end
   end
@@ -75,6 +76,7 @@ module PermalinkFu
         attr_accessor :permalink_options
         attr_accessor :permalink_attributes
         attr_accessor :permalink_field
+        attr_accessor :redirect_model
       end
       base.send :include, InstanceMethods
 
@@ -85,6 +87,7 @@ module PermalinkFu
       else
         base.before_validation :create_common_permalink
       end
+
       class << base
         alias_method :define_attribute_methods_without_permalinks, :define_attribute_methods
         alias_method :define_attribute_methods, :define_attribute_methods_with_permalinks
@@ -97,16 +100,23 @@ module PermalinkFu
       end
       value
     end
+
+    def find_by_id_or_permalink(id)
+      self.find(:first, :conditions => ["id = ? OR #{self.permalink_field} = ?", id, id]) or raise ActiveRecord::RecordNotFound
+    end
   end
 
   # This contains instance methods for ActiveRecord models that have permalinks.
   module InstanceMethods
+    def to_param
+      read_attribute(self.class.permalink_field) || id.to_s
+    end
+
   protected
     def create_common_permalink
       return unless should_create_permalink?
-      if read_attribute(self.class.permalink_field).to_s.empty?
-        send("#{self.class.permalink_field}=", create_permalink_for(self.class.permalink_attributes))
-      end
+      send("#{self.class.permalink_field}=", create_permalink_for(self.class.permalink_attributes))
+
       limit   = self.class.columns_hash[self.class.permalink_field].limit
       base    = send("#{self.class.permalink_field}=", read_attribute(self.class.permalink_field)[0..limit - 1])
       [limit, base]
@@ -141,12 +151,14 @@ module PermalinkFu
     end
 
     def create_permalink_for(attr_names)
-      attr_names.collect { |attr_name| send(attr_name).to_s } * " "
+      separator = self.class.permalink_options[:separator] || " "
+      attr_names.collect { |attr_name| send(attr_name).to_s } * separator
     end
 
   private
     def should_create_permalink?
-      return false unless permalink_fields_changed?
+      return false unless create_redirect_if_permalink_fields_changed
+
       if self.class.permalink_options[:if]
         evaluate_method(self.class.permalink_options[:if])
       elsif self.class.permalink_options[:unless]
@@ -156,11 +168,21 @@ module PermalinkFu
       end
     end
 
-    def permalink_fields_changed?
-      self.class.permalink_attributes.any? do |attribute|
-        changed_method = "#{attribute}_changed?"
-        respond_to?(changed_method) ? send(changed_method) : true
+    # Create a new Redirect instance if the fields have been changed
+    def create_redirect_if_permalink_fields_changed
+      former = send(self.class.permalink_field)
+      current = PermalinkFu.escape(create_permalink_for(self.class.permalink_attributes))
+      attributes = {:model => self.class.name, :former_permalink => former, :current_permalink => current}
+
+      if !former.nil? && former != current
+        # If the model attributes are being rolled back to some older value, delete the old redirect
+        self.class.redirect_model.delete_all :model => self.class.name, :former_permalink => current
+        self.class.redirect_model.update_all ['current_permalink = ?', current], :current_permalink => former
+
+        self.class.redirect_model.create(attributes)
       end
+
+      return former != current
     end
 
     def evaluate_method(method)
@@ -171,6 +193,33 @@ module PermalinkFu
         eval(method, instance_eval { binding })
       when Proc, Method
         method.call(self)
+      end
+    end
+  end
+
+  module Controller
+    module ClassMethods
+      def handles_permalink_redirects(options = {})
+        class << self
+          attr_accessor :redirect_model, :data_model
+        end
+
+        self.redirect_model = options.delete(:using) || Redirect
+        self.data_model     = options.delete(:on)    || self.name.sub(/Controller$/, '').singularize.constantize
+
+        before_filter :check_for_former_permalink, {:only => :show}.merge(options)
+    
+        include InstanceMethods
+      end
+    end
+
+    module InstanceMethods
+      def check_for_former_permalink
+        redirect = self.class.redirect_model.find(:first,
+          :conditions => {:model => self.class.data_model.name, :former_permalink => params[:id]})
+
+        return unless redirect
+        redirect_to request.path.sub(/[\w-]+$/, redirect.current_permalink)
       end
     end
   end
