@@ -101,8 +101,10 @@ module PermalinkFu
       value
     end
 
-    def find_by_id_or_permalink(id)
-      self.find(:first, :conditions => ["id = ? OR #{self.permalink_field} = ?", id, id]) or raise ActiveRecord::RecordNotFound
+    def find_by_id_or_permalink(id, options = {})
+      with_scope(:find => {:conditions => ["id = ? OR #{self.permalink_field} = ?", id, id]}) do
+        self.find(:first, options) or raise ActiveRecord::RecordNotFound
+      end
     end
   end
 
