@@ -51,6 +51,9 @@ module PermalinkFu
     #
     #     # do not bother checking for a unique scope
     #     has_permalink :title, :unique => false
+    #
+    #     # Use the `Antani` model to save permalink redirects
+    #     has_permalink :title, :redirect_model => Antani
     #   end
     #
     def has_permalink(attr_names = [], permalink_field = nil, options = {})
@@ -182,6 +185,7 @@ module PermalinkFu
     end
 
     # Create a new Redirect instance if the fields have been changed
+    #
     def create_redirect_if_permalink_fields_changed
       former = send(self.class.permalink_field)
       current = PermalinkFu.escape(create_permalink_for(self.class.permalink_attributes))
@@ -212,6 +216,15 @@ module PermalinkFu
 
   module Controller
     module ClassMethods
+      # Configures a before_filter for this controller in order to check for former
+      # permalinks and automagically redirect the user to the current one. Supported
+      # options:
+      #
+      #  * :using  => specifies the Redirect model to use, in case you've overriden the defaults
+      #  * :on     => specifies the data model to use, by default inferred from the controller name.
+      #  * :only   => run the filter only on the specified actions. by default it is run only on the :show action
+      #  * :except => run the filter on all actions except on the specified ones.
+      #
       def handles_permalink_redirects(options = {})
         class << self
           attr_accessor :redirect_model, :data_model

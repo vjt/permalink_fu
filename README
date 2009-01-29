@@ -1,4 +1,4 @@
-PermalinkFu
+-*- PermalinkFu -*-
 
 This is a simple plugin extracted from Mephisto for creating permalinks from attributes.
 
@@ -10,8 +10,10 @@ This will escape the title, making it fit to use in a URL in the after_validatio
 
 Use PermalinkFu.escape to escape a string manually if you like.
 
-If you're having issues with Iconv, you can manually tweak PermalinkFu.translation_to PermalinkFu.translation_from.
-These are set to nil if Iconv is not loaded.  You can also manually set them to nil if you don't want to use iconv.
+If you're having issues with Iconv, you can manually tweak `PermalinkFu.translation_to` and
+`PermalinkFu.translation_from`. These are set to `nil` if Iconv is not loaded. You can also
+manually set them to nil if you don't want to use Iconv.
+
 
 [Added 3.13.2008 by Pat Nakajima] You can now add conditions to #has_permalink like so:
 
@@ -21,3 +23,65 @@ These are set to nil if Iconv is not loaded.  You can also manually set them to 
 
 Use the :if or :unless options to specify a Proc, method, or string to be called or evaluated. The permalink
 will only be generated if the option evaluates to true.
+
+
+[Added 1.20.2009 by Marcello Barnaba] You can now safely alter the attributes from which the
+permalink is generated, getting a new permalink back. The old permalink will be still valid,
+and it will redirect to the new one. This is achieved by saving the old and new permalink in
+a database table, and checking it with a before_filter in the controller.
+
+One example is worth a thousand words:
+
+  $ rake permalink_fu:setup
+  Wrote Redirect model in app/models/redirect.rb
+  Wrote Redirect migration as create_redirects_table_for_permalinks.rb.
+  Don't forget to run `rake db:migrate`
+
+You can tweak both the model and the migration to fit your needs, as long as you don't change
+the attribute names. You can add more functionality, though. Improvements are welcome.
+The redirect model default name is "Redirect", you can change it by setting the MODEL_NAME
+environment variable when launching the :setup rake task.
+
+  $ rake db:migrate
+  ==  CreateRedirectsTableForPermalinks: migrating ==============================
+  -- create_table(:redirects)
+     -> 0.1619s
+  ==  CreateRedirectsTableForPermalinks: migrated (0.1622s) =====================
+
+Now, assuming this is your model class:
+
+  class Business < ActiveRecord::Base
+    has_permalink [:category, :title]
+  end
+
+whenever you alter the `category` or the `title` attribute of an instance, a new `permalink` is
+generated, and a Redirect instance is created, that contains the former and the current permalink.
+
+Then, in your controller:
+
+  class BusinessesController < ApplicationController
+    handles_permalink_redirects
+  end
+
+That method installs a before_filter that checks whether the requested `id` is an old permalink,
+and redirects (302 temporary) the client to the new one. Easy as pie. See the method documentation
+in rdoc for supported options, by default the filter is run only on the :show action.
+
+Redirect instances are linked to the original model via an `has_many` association, and you can
+access them using the `.redirects` method on a model instance. Redirects are also destroyed when
+the associated model is destroyed as well.
+
+
+WARNING: this fork of permalink_fu contains an incompatible API change with the original one:
+the `_changed?` methods support was removed. Instead of adding methods on the model, I implemented
+checking for changed attributes by recalculating the permalink on the current attributes, and
+comparing it to the saved one. This code is in the `create_redirect_if_permalink_fields_changed`
+method.
+
+The test suite has been updated to reflect these changes, and also to test the added functionality.
+ActiveRecord mocks were heavily improved, but the ActionController functionality hasn't got any
+test. By the way, the code is really trivial, and IMHO there's no need to pollute the tests even
+more with ActionController mocks to test a couple of lines of code. YMMV, though.
+
+- vjt@openssl.it
+Thu Jan 29 13:24:20 CET 2009
