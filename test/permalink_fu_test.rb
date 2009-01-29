@@ -46,6 +46,10 @@ class BaseModel
     nil
   end
 
+  def self.has_many *args
+    nil
+  end
+
   def self.define_attribute_methods
     return unless generated_methods.empty?
     true
@@ -111,6 +115,10 @@ class Redirect < BaseModel
 
   def destroy
     self.class.destroy(self)
+  end
+
+  def self.table_name
+    'redirects'
   end
 
   def self.find(what, options = {})
