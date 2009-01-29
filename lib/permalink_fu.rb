@@ -30,18 +30,17 @@ module PermalinkFu
 
   # This is the plugin method available on all ActiveRecord models.
   module PluginMethods
-    # Specifies the given field(s) as a permalink, meaning it is passed through PermalinkFu.escape and set to the permalink_field.  This
-    # is done
+    # Specifies the given field(s) as a permalink, meaning it is passed through PermalinkFu.escape
+    # and set to the permalink_field.
     #
     #   class Foo < ActiveRecord::Base
     #     # stores permalink form of #title to the #permalink attribute
     #     has_permalink :title
     #   
     #     # stores a permalink form of "#{category}-#{title}" to the #permalink attribute
-    #   
     #     has_permalink [:category, :title]
     #   
-    #     # stores permalink form of #title to the #category_permalink attribute
+    #     # stores permalink form of "#{category}-#{title}" to the #category_permalink attribute
     #     has_permalink [:category, :title], :category_permalink
     #
     #     # add a scope
@@ -86,6 +85,13 @@ module PermalinkFu
         base.before_validation :create_unique_permalink
       else
         base.before_validation :create_common_permalink
+      end
+
+      base.has_many :redirects, :class_name => base.redirect_model.name, :dependent => :destroy,
+        :finder_sql => "SELECT * FROM #{base.redirect_model.table_name} " \
+          "WHERE model = '\#{self.class.name}' AND current_permalink = '\#{self.#{base.permalink_field}}'" do
+        def delete_all; destroy_all end # Because the default method assumes we're using a standard association,
+                                        # and this is not the case. it would trigger an error, and we don't want to.
       end
 
       class << base
