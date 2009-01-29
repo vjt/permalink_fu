@@ -58,6 +58,7 @@ module PermalinkFu
         options = permalink_field
         permalink_field = nil
       end
+
       ClassMethods.setup_permalink_fu_on self do
         self.permalink_attributes = Array(attr_names)
         self.permalink_field      = (permalink_field || 'permalink').to_s
@@ -98,6 +99,11 @@ module PermalinkFu
         alias_method :define_attribute_methods_without_permalinks, :define_attribute_methods
         alias_method :define_attribute_methods, :define_attribute_methods_with_permalinks
       end
+
+    rescue NameError
+      puts "Run the permalink_fu:setup rake task!" unless $0 =~ /rake$/ # Chunky
+      eval "class ::Redirect; def self.method_missing(*args); end; end" # Bacon!
+      retry
     end
 
     def define_attribute_methods_with_permalinks
